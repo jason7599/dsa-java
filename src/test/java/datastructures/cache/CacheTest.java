@@ -7,19 +7,11 @@ import org.junit.jupiter.params.ParameterizedClass;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.LinkedHashMap;
-import java.util.Map;
-import java.util.Random;
+import java.util.*;
 import java.util.function.IntFunction;
 import java.util.stream.Stream;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assertions.fail;
+import static org.junit.jupiter.api.Assertions.*;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
@@ -47,8 +39,9 @@ class CacheTest {
         return Stream.of(
                 // The reference runs the tests too: a test that fails on LinkedHashMap is a wrong test.
                 impl("LinkedHashMap (LRU reference)", ReferenceLRU::new, Policy.LRU),
-                impl("LRUCache", LRUCache::new, Policy.LRU)
-                // impl("ClockCache", ClockCache::new, Policy.CLOCK)
+                impl("Second-chance FIFO (CLOCK reference)", ReferenceSecondChance::new, Policy.CLOCK),
+                impl("LRUCache", LRUCache::new, Policy.LRU),
+                impl("ClockCache", ClockCache::new, Policy.CLOCK)
         ).filter(a -> only == null || a.getName().toLowerCase().contains(only.toLowerCase()));
     }
 
@@ -62,7 +55,7 @@ class CacheTest {
     static Cache<Integer, Integer> referenceFor(Policy policy, int capacity) {
         return switch (policy) {
             case LRU -> new ReferenceLRU<>(capacity);
-            case CLOCK -> null; // TODO: a deliberately naive ClockCache (plain array + loop) once you build CLOCK
+            case CLOCK -> new ReferenceSecondChance<>(capacity);
         };
     }
 
@@ -357,5 +350,54 @@ class CacheTest {
         @Override public V get(K key) { return map.get(key); }
         @Override public void put(K key, V value) { map.put(key, value); }
         @Override public int size() { return map.size(); }
+    }
+
+    /** Exact CLOCK, built differently: a second-chance FIFO queue where entries really do move. */
+    static final class ReferenceSecondChance<K, V> extends Cache<K, V> {
+
+        private final ArrayDeque<K> queue = new ArrayDeque<>(); // front = next eviction candidate
+        private final Map<K, V> values = new HashMap<>();
+        private final Map<K, Boolean> referenced = new HashMap<>();
+
+        ReferenceSecondChance(int capacity) {
+            super(capacity);
+        }
+
+        @Override
+        public V get(K key) {
+            if (!values.containsKey(key)) return null;
+            referenced.put(key, true);
+            return values.get(key);
+        }
+
+        @Override
+        public void put(K key, V value) {
+            if (values.containsKey(key)) {
+                values.put(key, value);
+                referenced.put(key, true);
+                return;
+            }
+            if (values.size() == capacity) {
+                while (true) {
+                    K front = queue.pollFirst();
+                    if (referenced.get(front)) {   // second chance: clear and requeue
+                        referenced.put(front, false);
+                        queue.addLast(front);
+                    } else {                        // victim
+                        values.remove(front);
+                        referenced.remove(front);
+                        break;
+                    }
+                }
+            }
+            queue.addLast(key);
+            values.put(key, value);
+            referenced.put(key, false);
+        }
+
+        @Override
+        public int size() {
+            return values.size();
+        }
     }
 }

@@ -3,6 +3,11 @@ package datastructures.cache;
 import datastructures.hashtable.ChainedHashTable;
 import datastructures.hashtable.HashTable;
 
+/**
+ * A doubly linked list, but with a hash map pointing where each node is.
+ * From the core perspective, a cache is much like a hash table, but
+ * one with a fixed capacity and a policy on who to evict once full.
+ */
 public class LRUCache<K, V> extends Cache<K, V> {
 
     private static class Node<K, V> {
