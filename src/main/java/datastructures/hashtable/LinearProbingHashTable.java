@@ -99,7 +99,7 @@ public class LinearProbingHashTable<K, V> implements HashTable<K, V> {
     }
 
     @Override
-    public void put(K key, V value) {
+    public V put(K key, V value) {
 
         // Done preemptively, even if key might already exist in which case
         // it is replaced and used is not incremented.
@@ -127,7 +127,7 @@ public class LinearProbingHashTable<K, V> implements HashTable<K, V> {
                     used++;
                 }
                 size++;
-                return;
+                return null;
             }
 
             if (entry.deleted) {
@@ -136,8 +136,9 @@ public class LinearProbingHashTable<K, V> implements HashTable<K, V> {
                 }
             } else if (entry.key.equals(key)) {
                 // replace
+                V old = entry.value;
                 entry.value = value;
-                return;
+                return old;
             }
         }
 

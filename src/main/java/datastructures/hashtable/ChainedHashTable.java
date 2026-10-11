@@ -69,12 +69,13 @@ public class ChainedHashTable<K, V> implements HashTable<K, V> {
     }
 
     @Override
-    public void put(K key, V value) {
+    public V put(K key, V value) {
         Entry<K, V> entry = getEntry(key);
         if (entry != null) {
             // replace existing
+            V old = entry.value;
             entry.value = value;
-            return;
+            return old;
         }
 
         if ((double)(size + 1) / buckets.length > MAX_LOAD_FACTOR) {
@@ -87,6 +88,8 @@ public class ChainedHashTable<K, V> implements HashTable<K, V> {
         newEntry.next = buckets[index];
         buckets[index] = newEntry;
         size++;
+
+        return null;
     }
 
     @Override
