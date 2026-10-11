@@ -5,11 +5,25 @@ import datastructures.hashtable.HashTable;
 
 /**
  * A "second chance FIFO".
- * Imagine a FIFO queue where each entry has a "ref" bit. On lookup, if this bit is 1,
+ * Imagine a FIFO queue where each entry has a "ref" bit. On eviction scan, if this bit is 1,
  * clear it and move it to the back of the queue, hence getting a second chance.
  * If it is 0, it gets evicted.
  * CLOCK does the same thing, except nothing moves. The entries stay in the fixed ring,
  * and the "hand" moves instead. The hand points the front of the queue.
+ *
+ * Implementation is beautifully simple...
+ * No explicit sorting logic, no linked list pointer chasing,
+ * just a circular walk where nothing moves.
+ *
+ * The whole point of is to "approximate" LRU with a single bit timestamp.
+ * The `referenced` field denotes whether the entry was used since the hand last came by.
+ *
+ * Apparently this simple mechanism often beat LRU in real cases.
+ * The idea being: real workloads have lots of "one-off" hits, and evicting them quickly mattered.
+ * Whereas classic LRU has to waste cache space by carrying them all the way down the list.
+ *
+ * Tho ofc, this simplicity does come with the cost of precision.
+ * Also can suffer from Belady's anomaly, where more capacity results in more misses.
  */
 public class ClockCache<K, V> extends Cache<K, V> {
 
