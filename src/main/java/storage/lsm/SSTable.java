@@ -7,7 +7,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
+import java.util.ArrayList;
 import java.util.Iterator;
+import java.util.List;
 
 /**
  * An immutable, sorted file of entries on disk.
@@ -25,17 +27,22 @@ import java.util.Iterator;
  * Instead, only when get is called does it read the file and search for the entry.
  * TODO: Which is why we should also add something like a bloom filter here so that we can avoid unnecessary disk reads.
  */
-public class SSTable implements AutoCloseable, Iterable<Entry> {
+class SSTable implements AutoCloseable, Iterable<Entry> {
 
     private final Path path;
     private final FileChannel channel;
+    private final List<BlockIndexEntry> index;
 
-    public SSTable(Path path) throws IOException {
+    private static final int BLOCK_SIZE = 1 << 12; // 4kb
+
+
+    private SSTable(Path path, List<BlockIndexEntry> index) throws IOException {
         this.path = path;
         channel = FileChannel.open(
                 path,
                 StandardOpenOption.READ // Read only.
         );
+        this.index = index;
     }
 
     /**
@@ -45,8 +52,9 @@ public class SSTable implements AutoCloseable, Iterable<Entry> {
      * The tmp file itself is not important, because the source data
      * still exists elsewhere (the WAL, or the compaction inputs) until the rename completes
      */
-    public static SSTable create(Path path, Iterator<Entry> entries) throws IOException {
+    static SSTable create(Path path, Iterator<Entry> entries) throws IOException {
         Path tmp = path.resolveSibling(path.getFileName() + ".tmp");
+        List<BlockIndexEntry> index = new ArrayList<>();
 
         try {
             try (FileChannel channel = FileChannel.open(
@@ -55,8 +63,32 @@ public class SSTable implements AutoCloseable, Iterable<Entry> {
                     StandardOpenOption.WRITE,
                     StandardOpenOption.TRUNCATE_EXISTING // in case of duplicate tmp files
             )) {
+                String blockFirstKey = null;
+                long blockOffset = 0;
+                int blockBytes = 0;
+
                 while (entries.hasNext()) {
                     Entry entry = entries.next();
+                    int entrySize = entry.encodedSize();
+
+                    // Does this entry require a new block?
+                    if (blockBytes > 0 && blockBytes + entrySize > BLOCK_SIZE) {
+                        index.add(new BlockIndexEntry(
+                                blockFirstKey,
+                                blockOffset,
+                                blockBytes
+                        ));
+
+                        blockFirstKey = null;
+                        blockBytes = 0;
+                    }
+
+                    // first key of a new block
+                    if (blockFirstKey == null) {
+                        blockFirstKey = entry.key();
+                        blockOffset = channel.position();
+                    }
+
                     ByteBuffer buf = entry.serialize();
 
                     while (buf.hasRemaining()) {
@@ -64,24 +96,44 @@ public class SSTable implements AutoCloseable, Iterable<Entry> {
                             throw new IOException("No progress writing SSTable entry");
                         }
                     }
+
+                    blockBytes += entrySize;
                 }
+
+                if (blockBytes > 0) {
+                    index.add(new BlockIndexEntry(
+                            blockFirstKey,
+                            blockOffset,
+                            blockBytes
+                    ));
+                }
+
+//                int
+
+                // serialize block index
+
+
                 // tmp data is now on disk
                 channel.force(true);
             }
 
             // Publish the completed SSTable
             // Requests an atomic filesystem rename
-            Files.move(tmp, path, StandardCopyOption.ATOMIC_MOVE);
+            Files.move(
+                    tmp,
+                    path,
+                    StandardCopyOption.ATOMIC_MOVE
+            );
 
-            return new SSTable(path);
+            return new SSTable(path, index);
 
         } finally {
             Files.deleteIfExists(tmp);
         }
     }
 
-    public Entry get(String key) {
-
+    Entry get(String key) {
+        return null;
     }
 
     @Override

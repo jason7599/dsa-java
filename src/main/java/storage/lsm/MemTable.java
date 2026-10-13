@@ -20,7 +20,7 @@ import java.util.TreeMap;
  * - approximateSizeBytes: to tell LSMTree when it's time to flush.
  * - freeze: make it read-only before flushing.
  */
-public class MemTable implements Iterable<Entry> {
+class MemTable implements Iterable<Entry> {
 
     // TODO: Would love to plug my own SkipList or any other SortedMultiset impls,
     // TODO: but sadly as of right now they don't provide a replace API which is required
@@ -30,7 +30,7 @@ public class MemTable implements Iterable<Entry> {
     private long sizeBytes;
     private boolean frozen;
 
-    public void put(Entry entry) {
+    void put(Entry entry) {
         if (frozen) throw new IllegalStateException("memtable is frozen");
 
         Entry prev = map.put(entry.key(), entry);
@@ -42,15 +42,15 @@ public class MemTable implements Iterable<Entry> {
 
     // returns null if absent
     // if tombstone, .value() == null
-    public Entry get(String key) {
+    Entry get(String key) {
         return map.get(key);
     }
 
-    public void freeze() {
+    void freeze() {
         frozen = true;
     }
 
-    public boolean isEmpty() {
+    boolean isEmpty() {
         return map.isEmpty();
     }
 

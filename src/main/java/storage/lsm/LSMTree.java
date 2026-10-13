@@ -92,7 +92,7 @@ public class LSMTree implements KeyValueStore {
 
         if (entry != null) return entry.value();
 
-
+        return null;
     }
 
     @Override

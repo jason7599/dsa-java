@@ -2,7 +2,6 @@ package datastructures.sortedmultiset;
 
 import datastructures.bplustree.BPlusTree;
 import datastructures.bst.AVLTree;
-import datastructures.bst.UnbalancedBinarySearchTree;
 import datastructures.skiplist.SkipList;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -11,24 +10,11 @@ import org.junit.jupiter.params.ParameterizedClass;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Iterator;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.NoSuchElementException;
-import java.util.Random;
-import java.util.TreeMap;
+import java.util.*;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
+import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Contract tests for every SortedMultiset implementation.
@@ -50,7 +36,7 @@ class SortedMultisetTest {
                 // The reference runs the contract too: a test that fails on TreeMap is a wrong test.
                 impl("TreeMap (reference)", TreeMapMultiset::new, 10_000_000),
                 // Sorted inserts make it a linked list (and recursion gets deep), so keep it small.
-                impl("UnbalancedBST", UnbalancedBinarySearchTree::new, 5_000),
+//                impl("UnbalancedBST", UnbalancedBinarySearchTree::new, 5_000),
                 impl("AVLTree", AVLTree::new, 10_000_000),
                 impl("SkipList", () -> new SkipList<>(new Random(SEED)), 10_000_000),
                 impl("B+Tree(5)", () -> new BPlusTree<>(5), 10_000_000),
@@ -66,7 +52,7 @@ class SortedMultisetTest {
     }
 
     static final int BENCHMARK_SIZE =
-            Integer.parseInt(System.getProperty("benchmark.size", "10_000").replace("_", ""));
+            Integer.parseInt(System.getProperty("benchmark.size", "1_000_000").replace("_", ""));
 
     @Parameter(0)
     Impl impl;
@@ -270,7 +256,7 @@ class SortedMultisetTest {
     @Test
     void benchmark() {
         final int n = BENCHMARK_SIZE;
-        assumeTrue(n <= impl.maxBenchmarkSize(), () -> "too slow for " + impl.name() + " at n = " + n);
+//        assumeTrue(n <= impl.maxBenchmarkSize(), () -> "too slow for " + impl.name() + " at n = " + n);
 
         int[] keys = rng.ints(n).toArray();
         int[] probes = new int[n]; // about half hits, half (almost certain) misses

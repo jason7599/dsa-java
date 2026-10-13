@@ -15,13 +15,15 @@ import java.util.zip.CRC32;
  * - value: raw value bytes
  * - crc32: CRC Checksum, 4 byte int
  */
-public final class Entry implements Comparable<Entry> {
+final class Entry implements Comparable<Entry> {
 
     private final String key;
     private final String value;     // null = tombstone
     private final int encodedSize;  // precomputed once and cached
 
-    public Entry(String key, String value) {
+    private static final int MIN_ENTRY_SIZE = 13;
+
+    Entry(String key, String value) {
         this.key = Objects.requireNonNull(key);
         this.value = value;
         encodedSize
@@ -31,12 +33,12 @@ public final class Entry implements Comparable<Entry> {
                 + 4;    // crc
     }
 
-    public String key() { return key; }
-    public String value() { return value; }
-    public boolean isTombstone() { return value == null; }
-    public int encodedSize() { return encodedSize; }
+    String key() { return key; }
+    String value() { return value; }
+    boolean isTombstone() { return value == null; }
+    int encodedSize() { return encodedSize; }
 
-    public ByteBuffer serialize() {
+    ByteBuffer serialize() {
         byte[] keyBytes = key.getBytes(StandardCharsets.UTF_8);
         byte[] valueBytes = isTombstone()
                 ? new byte[0]
@@ -62,10 +64,21 @@ public final class Entry implements Comparable<Entry> {
         return buf;
     }
 
-    public static Entry deserialize(ByteBuffer buf) {
-        int start = buf.position();
+    static Entry deserialize(ByteBuffer buf) {
+        Objects.requireNonNull(buf);
 
-        boolean tombstone = buf.get() != 0;
+        final int start = buf.position();
+
+        if (buf.remaining() < MIN_ENTRY_SIZE) {
+            throw new CorruptEntryException("Truncated entry header");
+        }
+
+        byte flag = buf.get();
+        if (flag != 0 & flag != 1) {
+            throw new CorruptEntryException("Invalid tombstone flag: " + flag);
+        }
+
+        boolean tombstone = flag == 1;
 
         int keyLength = buf.getInt();
         if (keyLength < 0 || keyLength > buf.remaining()) {

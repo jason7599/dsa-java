@@ -667,11 +667,17 @@ public class BPlusTree<T extends Comparable<? super T>> implements SortedMultise
 
         // find first index where keys[index] > key
         int upperBound(T key) {
-            int i = 0;
-            while (i < keyCount && key.compareTo(keys[i]) >= 0) {
-                i++;
+            int lo = 0, hi = keyCount;
+            while (lo < hi) {
+                int mid = (lo + hi) >>> 1;
+
+                if (key.compareTo(keys[mid]) >= 0) {
+                    lo = mid + 1;
+                } else {
+                    hi = mid;
+                }
             }
-            return i;
+            return lo;
         }
     }
 
@@ -688,11 +694,17 @@ public class BPlusTree<T extends Comparable<? super T>> implements SortedMultise
 
         // Find first index where keys[index] >= key, or size if none (= where key should be inserted).
         int lowerBound(T key) {
-            int i = 0;
-            while (i < keyCount && key.compareTo(keys[i]) > 0) {
-                i++;
+            int lo = 0, hi = keyCount;
+            while (lo < hi) {
+                int mid = (lo + hi) >>> 1;
+
+                if (key.compareTo(keys[mid]) > 0) {
+                    lo = mid + 1;
+                } else {
+                    hi = mid;
+                }
             }
-            return i;
+            return lo;
         }
     }
 
