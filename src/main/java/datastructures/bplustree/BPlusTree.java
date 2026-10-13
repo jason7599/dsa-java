@@ -19,6 +19,7 @@ public class BPlusTree<T extends Comparable<? super T>> implements SortedMultise
     /* package-private */ Node<T> root;  // cannot be final, root starts as a leaf but can turn into internal
     private int size;
 
+    //region Constructors
     public BPlusTree() {
         this(DEFAULT_ORDER);
     }
@@ -29,6 +30,7 @@ public class BPlusTree<T extends Comparable<? super T>> implements SortedMultise
         minKeys = (order + 1) / 2 - 1;
         root = new LeafNode<>(order);
     }
+    //endregion
 
     //region Public API
     @Override
@@ -224,14 +226,10 @@ public class BPlusTree<T extends Comparable<? super T>> implements SortedMultise
         // no restructuring, everyone is happy
         if (s == null) return null;
 
-        /*
-         * `i` has split. `i` is still there, but we need to make room for the next `right`
-         */
-        // make room for new separator
-        shiftRight(in.keys, i, in.keyCount);
-        in.keys[i] = s.sep;
-        shiftRight(in.children, i + 1, in.keyCount + 1);
-        in.children[i + 1] = s.right;
+        //`i` has split. `i` is still there, but we need to make room for the next `right`
+        // shift and insert the new separator and children
+        insertAt(in.keys, i, s.sep, in.keyCount);
+        insertAt(in.children, i + 1, s.right, in.keyCount + 1);
         in.keyCount++;
 
         // happy
@@ -268,11 +266,8 @@ public class BPlusTree<T extends Comparable<? super T>> implements SortedMultise
         }
 
         // Shift to make room for new key
-        shiftRight(ln.keys, i, ln.keyCount);
-        shiftRight(ln.counts, i, ln.keyCount);
-
-        ln.keys[i] = key;
-        ln.counts[i] = 1;
+        insertAt(ln.keys, i, key, ln.keyCount);
+        insertAt(ln.counts, i, 1, ln.keyCount);
         ln.keyCount++;
         size++;
 
@@ -337,10 +332,8 @@ public class BPlusTree<T extends Comparable<? super T>> implements SortedMultise
 
         size -= ln.counts[i];
 
-        shiftLeft(ln.keys, i, ln.keyCount);
-        shiftLeft(ln.counts, i, ln.keyCount);
-        ln.keys[ln.keyCount - 1] = null;
-        ln.counts[ln.keyCount - 1] = 0;
+        removeAt(ln.keys, i, ln.keyCount);
+        removeAt(ln.counts, i, ln.keyCount);
         ln.keyCount--;
 
         // Underfull check is done in the parent
@@ -354,6 +347,7 @@ public class BPlusTree<T extends Comparable<? super T>> implements SortedMultise
     private void fixUnderflow(InternalNode<T> p, int i) {
         if (i > 0 && p.children[i - 1].keyCount > minKeys) {
             // left sibling can spare one, steal from left.
+            rotateRight(p, i - 1);
         } else if (i < p.keyCount && p.children[i + 1].keyCount > minKeys) {
             // steal from right sibling.
             rotateLeft(p, i);
@@ -361,55 +355,181 @@ public class BPlusTree<T extends Comparable<? super T>> implements SortedMultise
     }
 
     /**
-     * p.children[s] is underfull but p.children[s + 1] can spare one
-     * @param p: The parent
-     * @param s: Always names the separator between the two children involved: children[s] | keys[s] | children[s + 1]
+     * Borrow one entry from the RIGHT sibling: children[s] (left) is underfull, children[s + 1] (right) can spare one.
+     * @param parent the internal node whose children are being rebalanced
+     * @param s index of the separator between them: children[s] | keys[s] | children[s+1]
      */
-    private void rotateLeft(InternalNode<T> p, int s) {
-        switch (p.children[s]) {
-            case InternalNode<T> ignored -> rotateLeftInternal(p, s);
-            case LeafNode<T> ignored -> rotateLeftLeaf(p, s);
+    private void rotateLeft(InternalNode<T> parent, int s) {
+        switch (parent.children[s]) {
+            case InternalNode<T> ignored -> rotateLeftInternal(parent, s);
+            case LeafNode<T> ignored -> rotateLeftLeaf(parent, s);
         }
     }
 
-    private void rotateLeftInternal(InternalNode<T> p, int s) {
-        InternalNode<T> node = (InternalNode<T>) p.children[s];
-        InternalNode<T> sib = (InternalNode<T>) p.children[s + 1];
+    /**
+     * Borrow one entry from the RIGHT sibling: children[s] (left) is underfull,
+     * children[s+1] (right) can spare one. s = index of the separator between them.
+     *
+     * Internal version. Internal keys are signposts, so the key rotates THROUGH the parent:
+     *
+     *          [ … P … ]                        [ … R0 … ]
+     *           /     \                          /      \
+     *     [L0 …]       [R0 R1 …]     ->    [L0 … P]      [R1 …]
+     *     /  …  \      /  |  …                 …  \       |  …
+     *                 c                            c
+     *
+     * - P  (parent's separator) comes DOWN to the end of left
+     * - R0 (right's first key) goes UP to replace it
+     * - c  (right's first child) crosses over to become left's last child
+     */
+    private void rotateLeftInternal(InternalNode<T> parent, int s) {
+        InternalNode<T> left = (InternalNode<T>) parent.children[s];
+        InternalNode<T> right = (InternalNode<T>) parent.children[s + 1];
+        int lk = left.keyCount;
+        int rk = right.keyCount;
 
-        // rotate keys
-        node.keys[node.keyCount] = p.keys[s];
-        p.keys[s] = sib.keys[0];
+        // Take right's first key and first child out
+        T up = removeAt(right.keys, 0, rk);
+        Node<T> child = removeAt(right.children, 0, rk + 1);
+        right.keyCount--;
 
-        node.children[node.keyCount + 1] = sib.children[0];
-        node.keyCount++; // from taking parent's key
+        // Left takes parent's separator
+        left.keys[lk] = parent.keys[s];
+        left.children[lk + 1] = child;
+        left.keyCount++;
 
-        shiftLeft(sib.keys, 0, sib.keyCount);
-        shiftLeft(sib.children, 0, sib.keyCount + 1);
-        sib.keys[sib.keyCount - 1] = null;
-        sib.children[sib.keyCount] = null;
-
-        sib.keyCount--;
+        // Right's old first key becomes the new separator
+        parent.keys[s] = up;
     }
 
-    private void rotateLeftLeaf(InternalNode<T> p, int s) {
-        LeafNode<T> node = (LeafNode<T>) p.children[s];
-        LeafNode<T> sib = (LeafNode<T>) p.children[s + 1];
+    /**
+     * Borrow one entry from the RIGHT sibling: children[s] (left) is underfull,
+     * children[s+1] (right) can spare one. s = index of the separator between them.
+     *
+     * Leaf version. Leaf keys are real elements, so they move SIDEWAYS (with their counts).
+     * The parent's separator is only a copy, so it gets updated afterward:
+     *
+     *          [ … 40 … ]                     [ … 50 … ]
+     *           /      \                       /      \
+     *        [ ]       [40 50]      ->      [40]      [50]
+     */
+    private void rotateLeftLeaf(InternalNode<T> parent, int s) {
+        LeafNode<T> left = (LeafNode<T>) parent.children[s];
+        LeafNode<T> right = (LeafNode<T>) parent.children[s + 1];
+        int lk = left.keyCount;
+        int rk = right.keyCount;
 
-        // rotate keys
-        node.keys[node.keyCount] = p.keys[s];
-        p.keys[s] = sib.keys[0];
+        left.keys[lk] = removeAt(right.keys, 0, rk);
+        left.counts[lk] = removeAt(right.counts, 0, rk);
+        left.keyCount++;
+        right.keyCount--;
+
+        parent.keys[s] = right.keys[0];
+    }
+
+    /**
+     * Borrow one entry from the LEFT sibling: children[s+1] (right) is underfull, children[s] (left) can spare one.
+     * @param parent the internal node whose children are being rebalanced
+     * @param s index of the separator between them: children[s] | keys[s] | children[s+1]
+     */
+    private void rotateRight(InternalNode<T> parent, int s) {
+        switch (parent.children[s]) {
+            case InternalNode<T> ignored -> rotateRightInternal(parent, s);
+            case LeafNode<T> ignored -> rotateRightLeaf(parent, s);
+        }
+    }
+
+    /**
+     * Borrow one entry from the LEFT sibling: children[s+1] (right) is underfull,
+     * children[s] (left) can spare one. s = index of the separator between them.
+     *
+     * Internal version. Internal keys are signposts, so the key rotates THROUGH the parent:
+     *
+     *            [ … P … ]                          [ … L2 … ]
+     *             /     \                            /      \
+     *     [… L1 L2]      [R0 …]        →      [… L1]         [P R0 …]
+     *        …     \     /  …                    …           /   …
+     *               c                                       c
+     *
+     * - L2 (left's last key) goes UP to replace P
+     * - P  (parent's separator) comes DOWN to the front of right
+     * - c  (left's last child) crosses over to become right's first child
+     */
+    private void rotateRightInternal(InternalNode<T> parent, int s) {
+        InternalNode<T> left = (InternalNode<T>) parent.children[s];
+        InternalNode<T> right = (InternalNode<T>) parent.children[s + 1];
+        int lk = left.keyCount;
+        int rk = right.keyCount;
+
+        T up = removeAt(left.keys, lk - 1, lk);
+        Node<T> child = removeAt(left.children, lk, lk + 1);
+        left.keyCount--;
+
+        insertAt(right.keys, 0, parent.keys[s], rk);
+        insertAt(right.children, 0, child, rk + 1);
+        right.keyCount++;
+
+        parent.keys[s] = up;
+    }
+
+    /**
+     * Borrow one entry from the LEFT sibling: children[s+1] (right) is underfull,
+     * children[s] (left) can spare one. s = index of the separator between them.
+     *
+     * Leaf version. Leaf keys are real elements, so they move SIDEWAYS (with their counts).
+     * The parent's separator is only a copy, so it gets re-derived afterward:
+     *
+     *            [ … 30 … ]                         [ … 20 … ]
+     *             /      \                           /      \
+     *        [10 20]      [ ]          →          [10]      [20]
+     *
+     * - 20 (left's last element, key + count as a pair) moves to the FRONT of right
+     * - separator = right's NEW first key, which is exactly the element that just arrived
+     */
+    private void rotateRightLeaf(InternalNode<T> parent, int s) {
+        LeafNode<T> left = (LeafNode<T>) parent.children[s];
+        LeafNode<T> right = (LeafNode<T>) parent.children[s + 1];
+        int lk = left.keyCount;
+        int rk = right.keyCount;
+
+        insertAt(right.keys, 0, removeAt(left.keys, lk - 1, lk), rk);
+        insertAt(right.counts, 0, removeAt(left.counts, lk - 1, lk), rk);
+        left.keyCount--;
+        right.keyCount++;
+
+        parent.keys[s] = right.keys[0];
     }
 
     //endregion
 
-    //region General helpers
-    private static void shiftRight(Object array, int index, int size) {
-        System.arraycopy(array, index, array, index + 1, size - index);
+    //region Array helpers
+    // Provide separate int[] version for counts
+
+    // Inserts x at arr[i], shifting arr[i..n) right by one. arr must have room for n + 1.
+    private static <E> void insertAt(E[] arr, int i, E x, int n) {
+        System.arraycopy(arr, i, arr, i + 1, n - i);
+        arr[i] = x;
     }
 
-    private static void shiftLeft(Object array, int index, int size) {
-        System.arraycopy(array, index + 1, array, index, size - index - 1);
+    private static void insertAt(int[] arr, int i, int x, int n) {
+        System.arraycopy(arr, i, arr, i + 1, n - i);
+        arr[i] = x;
     }
+
+    private static <E> E removeAt(E[] arr, int i, int n) {
+        E x = arr[i];
+        System.arraycopy(arr, i + 1, arr, i, n - i - 1);
+        arr[n - 1] = null;
+        return x;
+    }
+
+    private static int removeAt(int[] arr, int i, int n) {
+        int x = arr[i];
+        System.arraycopy(arr, i + 1, arr, i, n - i - 1);
+        arr[n - 1] = 0;
+        return x;
+    }
+
     //endregion
 
     //region Nodes
