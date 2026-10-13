@@ -38,7 +38,8 @@ public class WriteAheadLog implements AutoCloseable {
         }
 
         // flush right away instead of keeping it in RAM
-        channel.force(false);
+        // param is whether to flush metadata too
+        channel.force(true);
     }
 
     /** Read from WAL file and return the entries in order. */
