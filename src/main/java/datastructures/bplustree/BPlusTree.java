@@ -77,11 +77,13 @@ public class BPlusTree<T extends Comparable<? super T>> implements SortedMultise
 
     @Override
     public T min() {
+        if (isEmpty()) return null;
         return leftmostLeaf().keys[0];
     }
 
     @Override
     public T max() {
+        if (isEmpty()) return null;
         LeafNode<T> ln = rightmostLeaf();
         return ln.keys[ln.keyCount - 1];
     }
@@ -124,28 +126,26 @@ public class BPlusTree<T extends Comparable<? super T>> implements SortedMultise
     public Iterator<T> iterator() {
         return new Iterator<>() {
             private LeafNode<T> current = leftmostLeaf();
-            private int index;
-            private int remaining = current == null ? 0 : current.counts[0];
+            private int index = 0;
+            private int remaining = current.keyCount == 0 ? 0 : current.counts[0];  // copies of keys[index] left
 
             @Override
             public boolean hasNext() {
-                return current != null;
+                return current != null && index < current.keyCount;   // empty root leaf → false
             }
 
             @Override
             public T next() {
                 if (!hasNext()) throw new NoSuchElementException();
-
                 T data = current.keys[index];
 
-                if (--remaining == 0) {
-                    if (++index == current.keyCount) {
+                if (--remaining == 0) {                     // that was the last copy: move to the next key
+                    if (++index == current.keyCount) {      // ...which may be in the next leaf
                         current = current.next;
                         index = 0;
-                        remaining = current == null ? 0 : current.counts[0];
                     }
+                    remaining = (current == null) ? 0 : current.counts[index];   // reset for EVERY new key
                 }
-
                 return data;
             }
         };

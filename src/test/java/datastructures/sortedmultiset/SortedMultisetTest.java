@@ -1,5 +1,6 @@
 package datastructures.sortedmultiset;
 
+import datastructures.bplustree.BPlusTree;
 import datastructures.bst.AVLTree;
 import datastructures.bst.UnbalancedBinarySearchTree;
 import datastructures.skiplist.SkipList;
@@ -51,7 +52,9 @@ class SortedMultisetTest {
                 // Sorted inserts make it a linked list (and recursion gets deep), so keep it small.
                 impl("UnbalancedBST", UnbalancedBinarySearchTree::new, 5_000),
                 impl("AVLTree", AVLTree::new, 10_000_000),
-                impl("SkipList", () -> new SkipList<>(new Random(SEED)), 10_000_000)
+                impl("SkipList", () -> new SkipList<>(new Random(SEED)), 10_000_000),
+                impl("B+Tree(5)", () -> new BPlusTree<>(5), 10_000_000),
+                impl("B+Tree(128)", () -> new BPlusTree<>(128), 10_000_000)
         ).filter(a -> only == null || a.getName().toLowerCase().contains(only.toLowerCase()));
     }
 
