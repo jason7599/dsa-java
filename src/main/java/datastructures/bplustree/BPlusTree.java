@@ -61,12 +61,12 @@ public class BPlusTree<T extends Comparable<? super T>> implements SortedMultise
 
     @Override
     public void remove(T data) {
-
+        remove(data, false);
     }
 
     @Override
     public void removeAll(T data) {
-
+        remove(data, true);
     }
 
     @Override
@@ -179,7 +179,7 @@ public class BPlusTree<T extends Comparable<? super T>> implements SortedMultise
         return (LeafNode<T>) n;
     }
 
-    private boolean isExact(LeafNode<T> ln, int i, T key) {
+    private static <T extends Comparable<? super T>> boolean isExact(LeafNode<T> ln, int i, T key) {
         return i < ln.keyCount && ln.keys[i].compareTo(key) == 0;
     }
 
@@ -303,6 +303,14 @@ public class BPlusTree<T extends Comparable<? super T>> implements SortedMultise
 
     //region Remove Helpers
 
+    private void remove(T key, boolean all) {
+        remove(root, key, all);
+        // Merge may have left the root empty and a single child
+        if (root instanceof InternalNode<T> in && in.keyCount == 0) {
+            root = in.children[0];
+        }
+    }
+
     private void remove(Node<T> n, T key, boolean all) {
         switch (n) {
             case InternalNode<T> in -> removeFromInternal(in, key, all);
@@ -351,9 +359,16 @@ public class BPlusTree<T extends Comparable<? super T>> implements SortedMultise
         } else if (i < p.keyCount && p.children[i + 1].keyCount > minKeys) {
             // steal from right sibling.
             rotateLeft(p, i);
+        } else if (i > 0) {
+            // merge child into its left sibling
+            merge(p, i - 1);
+        } else {
+            // merge right sibling into it (`i`)
+            merge(p, i);
         }
     }
 
+        //region Rotations
     /**
      * Borrow one entry from the RIGHT sibling: children[s] (left) is underfull, children[s + 1] (right) can spare one.
      * @param parent the internal node whose children are being rebalanced
@@ -500,7 +515,92 @@ public class BPlusTree<T extends Comparable<? super T>> implements SortedMultise
         parent.keys[s] = right.keys[0];
     }
 
-    //endregion
+        //endregion Rotations
+
+        //region Merge
+
+    /**
+     * Merge children[s + 1] (right) INTO children[s] (left),
+     * then drop separator s and the right child.
+     */
+    private void merge(InternalNode<T> parent, int s) {
+        switch (parent.children[s]) {
+            case InternalNode<T> ignored -> mergeInternal(parent, s);
+            case LeafNode<T> ignored -> mergeLeaf(parent, s);
+        }
+        removeSeparator(parent, s);
+    }
+
+    /**
+     * Internal merge: the separator comes DOWN between left's and right's contents
+     * (the mirror of an internal split, where the middle key moves up).
+     *
+     *            [ … P … ]                     [ … ]
+     *             /     \                        |
+     *         [L0]      [R0]         ->     [L0 P R0]
+     *         /  \      /  \                /  |  |  \
+     *        a    b    c    d              a   b  c   d
+     *
+     * - left.keys[lk] = parent.keys[s]                         (P comes down)
+     * - right's keys     -> left.keys     [lk+1, lk+1+rk)
+     * - right's children -> left.children [lk+1, lk+2+rk)      (children = keys + 1)
+     * - left.keyCount = lk + 1 + rk
+     *
+     * Parent separator removal is done afterward in the merge method
+     */
+    private void mergeInternal(InternalNode<T> parent, int s) {
+        InternalNode<T> left = (InternalNode<T>) parent.children[s];
+        InternalNode<T> right = (InternalNode<T>) parent.children[s + 1];
+        int lk = left.keyCount;
+        int rk = right.keyCount;
+
+        left.keys[lk] = parent.keys[s];
+        System.arraycopy(right.keys, 0, left.keys, lk + 1, rk);
+        System.arraycopy(right.children, 0, left.children, lk + 1, rk + 1);
+        left.keyCount += 1 + rk;
+    }
+
+    /**
+     * Leaf merge: right's elements are appended to left; right is discarded.
+     * The separator between them is just DROPPED (it was only a copy).
+     *
+     *            [ … 40 … ]                    [ … ]
+     *             /      \                       |
+     *         [20]       [ ]         ->        [20]
+     *
+     * - append right's keys + counts to the end of left: [lk, lk + rk)
+     * - fix the leaf chain: left.next = right.next; if that's not null, its prev = left
+     *     (right disappears from the chain, so nothing can reach it afterward)
+     */
+    private void mergeLeaf(InternalNode<T> parent, int s) {
+        LeafNode<T> left = (LeafNode<T>) parent.children[s];
+        LeafNode<T> right = (LeafNode<T>) parent.children[s + 1];
+        int lk = left.keyCount;
+        int rk = right.keyCount;
+
+        System.arraycopy(right.keys, 0, left.keys, lk, rk);
+        System.arraycopy(right.counts, 0, left.counts, lk, rk);
+        left.keyCount += rk;
+
+        left.next = right.next;
+        if (right.next != null) {
+            right.next.prev = left;
+        }
+    }
+
+    /**
+     * Removes separator keys[s] and the child to its RIGHT, children[s+1], from p.
+     * (The left child children[s] stays; it's the one that absorbed the right child.)
+     */
+    private static <T extends Comparable<? super T>> void removeSeparator(InternalNode<T> parent, int s) {
+        int k = parent.keyCount;
+        removeAt(parent.keys, s, k);
+        removeAt(parent.children, s + 1, k + 1);
+        parent.keyCount--;
+    }
+        //endregion Merge
+
+    //endregion Remove Helpers
 
     //region Array helpers
     // Provide separate int[] version for counts

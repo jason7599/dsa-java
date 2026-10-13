@@ -14,8 +14,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class BPlusTreeTest {
 
     static final long SEED = 666;
+    static final int[] ORDERS = {3, 4, 5, 128};
 
-    // ---- Golden structures: hand-checked pictures ----
+    // =====================================================================
+    // Insert: golden structures
+    // =====================================================================
+
     @Test
     void workedExample() {
         BPlusTree<Integer> t = new BPlusTree<>(3);
@@ -51,7 +55,147 @@ class BPlusTreeTest {
         checkInvariants(t);
     }
 
-    // ---- Adversarial insert orders ----
+    // =====================================================================
+    // Delete: golden structures, one per repair operation
+    // =====================================================================
+
+    @Test
+    void removeWithoutUnderflowTouchesOnlyTheLeaf() {
+        BPlusTree<Integer> t = tree(10, 20, 30, 40, 50);
+        t.remove(50);  // [40 50] -> [40], still >= minKeys
+        assertEquals("[30] / [20] [40] / [10] [20] [30] [40]", dump(t));
+        checkInvariants(t);
+    }
+
+    @Test
+    void leafBorrowsFromRightSibling() {
+        BPlusTree<Integer> t = tree(10, 20, 30, 40, 50);
+        assertEquals("[30] / [20] [40] / [10] [20] [30] [40 50]", dump(t));
+
+        t.remove(30);  // [30] empties; right sibling [40 50] lends 40; separator re-copied as 50
+        assertEquals("[30] / [20] [50] / [10] [20] [40] [50]", dump(t));
+        checkInvariants(t);  // root's 30 is now stale but still a valid signpost
+    }
+
+    @Test
+    void leafBorrowsFromLeftSibling() {
+        BPlusTree<Integer> t = tree(10, 20, 30, 5);
+        assertEquals("[20] / [5 10] [20 30]", dump(t));
+
+        t.remove(20);
+        assertEquals("[20] / [5 10] [30]", dump(t));  // no underflow, stale separator stays
+
+        t.remove(30);  // [30] empties; left sibling [5 10] lends 10; separator re-copied as 10
+        assertEquals("[10] / [5] [10]", dump(t));
+        checkInvariants(t);
+    }
+
+    @Test
+    void leafMergeCascadesIntoInternalMergeAndRootCollapse() {
+        BPlusTree<Integer> t = tree(10, 20, 30, 40, 50);
+        assertEquals(3, height(t));
+
+        // [20] empties, can't borrow from [10] -> leaf merge; its parent [20] loses its key ->
+        // can't borrow from [40] -> internal merge pulls 30 down -> root is empty -> collapse.
+        t.remove(20);
+        assertEquals("[30 40] / [10] [30] [40 50]", dump(t));
+        assertEquals(2, height(t));
+        checkInvariants(t);
+    }
+
+    @Test
+    void internalBorrowsFromRightSibling() {
+        BPlusTree<Integer> t = tree(10, 20, 30, 40, 50, 60);
+        assertEquals("[30] / [20] [40 50] / [10] [20] [30] [40] [50 60]", dump(t));
+
+        // leaf merge empties internal [20]; right internal sibling [40 50] lends:
+        // 30 comes down, 40 goes up, leaf [30] crosses over.
+        t.remove(20);
+        assertEquals("[40] / [30] [50] / [10] [30] [40] [50 60]", dump(t));
+        checkInvariants(t);
+    }
+
+    @Test
+    void internalBorrowsFromLeftSibling() {
+        BPlusTree<Integer> t = tree(10, 20, 30, 40, 50, 22, 24);
+        t.remove(50);
+        assertEquals("[30] / [20 22] [40] / [10] [20] [22 24] [30] [40]", dump(t));
+
+        // leaf merge empties internal [40]; left internal sibling [20 22] lends:
+        // 30 comes down, 22 goes up, leaf [22 24] crosses over.
+        t.remove(40);
+        assertEquals("[22] / [20] [30] / [10] [20] [22 24] [30]", dump(t));
+        checkInvariants(t);
+    }
+
+    @Test
+    void deletingEverythingShrinksBackToOneEmptyLeaf() {
+        BPlusTree<Integer> t = tree(10, 20, 30, 40, 50);
+        String[] expected = {
+                "[30 40] / [20] [30] [40 50]",
+                "[40] / [30] [40 50]",
+                "[50] / [40] [50]",
+                "[50]",
+                "[]",
+        };
+        int[] order = {10, 20, 30, 40, 50};
+        for (int k = 0; k < order.length; k++) {
+            t.remove(order[k]);
+            assertEquals(expected[k], dump(t), "after removing " + order[k]);
+            checkInvariants(t);
+        }
+        assertEquals(1, height(t));
+        assertEquals(0, t.size());
+
+        insertAll(t, 1, 2, 3);  // still usable afterwards
+        assertEquals("[2] / [1] [2 3]", dump(t));
+        checkInvariants(t);
+    }
+
+    // =====================================================================
+    // Delete: counts and no-ops
+    // =====================================================================
+
+    @Test
+    void removeDecrementsDuplicatesWithoutStructuralChange() {
+        BPlusTree<Integer> t = tree(10, 20, 30, 40, 50, 30, 30);
+        String before = dump(t);
+        t.remove(30);
+        assertEquals(before, dump(t));
+        assertEquals(2, t.count(30));
+        assertEquals(6, t.size());
+        checkInvariants(t);
+    }
+
+    @Test
+    void removeAllDropsEveryCopy() {
+        BPlusTree<Integer> t = tree(10, 20, 30, 40, 50, 30, 30);
+        t.removeAll(30);
+        assertEquals(0, t.count(30));
+        assertEquals(4, t.size());
+        checkInvariants(t);
+    }
+
+    @Test
+    void removingMissingKeysIsANoop() {
+        BPlusTree<Integer> t = tree(10, 20, 30, 40, 50);
+        String before = dump(t);
+        t.remove(25);
+        t.removeAll(99);
+        t.remove(-1);
+        assertEquals(before, dump(t));
+        assertEquals(5, t.size());
+
+        BPlusTree<Integer> empty = new BPlusTree<>(3);
+        empty.remove(1);
+        empty.removeAll(1);
+        assertEquals("[]", dump(empty));
+        checkInvariants(empty);
+    }
+
+    // =====================================================================
+    // Adversarial orders: insert everything, then delete everything
+    // =====================================================================
 
     @ParameterizedTest
     @ValueSource(ints = {3, 4, 5, 128})
@@ -77,7 +221,43 @@ class BPlusTreeTest {
         assertHeightIsLogarithmic(t, 20_000, order);
     }
 
-    // ---- Insert-only stress vs TreeMap (works while remove is still a stub) ----
+    @ParameterizedTest
+    @ValueSource(ints = {3, 4, 5, 128})
+    void deleteEverythingInVariousOrders(int order) {
+        final int n = 5_000;
+        List<Integer> keys = new ArrayList<>();
+        for (int i = 0; i < n; i++) keys.add(i);
+
+        List<Integer> ascending = new ArrayList<>(keys);
+        List<Integer> descending = new ArrayList<>(keys);
+        Collections.reverse(descending);
+        List<Integer> shuffled = new ArrayList<>(keys);
+        Collections.shuffle(shuffled, new Random(SEED));
+        List<Integer> outsideIn = new ArrayList<>();  // alternate ends: hammers both edges
+        for (int lo = 0, hi = n - 1; lo <= hi; lo++, hi--) {
+            outsideIn.add(lo);
+            if (lo != hi) outsideIn.add(hi);
+        }
+
+        for (List<Integer> deleteOrder : List.of(ascending, descending, shuffled, outsideIn)) {
+            BPlusTree<Integer> t = new BPlusTree<>(order);
+            for (int k : shuffled) t.insert(k);
+
+            int step = 0;
+            for (int k : deleteOrder) {
+                t.remove(k);
+                if (++step % 250 == 0) checkInvariants(t);
+            }
+            checkInvariants(t);
+            assertEquals(0, t.size(), "order " + order + ": size after deleting everything");
+            assertEquals("[]", dump(t), "order " + order + ": tree should collapse to one empty leaf");
+            assertEquals(1, height(t));
+        }
+    }
+
+    // =====================================================================
+    // Random stress vs TreeMap
+    // =====================================================================
 
     static final int STRESS_STEPS = 100_000;
     static final int CHECK_EVERY = 500;  // checkInvariants walks the whole tree, so not every step
@@ -97,8 +277,6 @@ class BPlusTreeTest {
 
                 final int s = step;
                 Supplier<String> where = () -> "order " + order + ", keyRange " + keyRange + ", step " + s;
-
-                // probe the key just inserted, plus a random one (often missing)
                 assertSameAnswers(t, ref, x, where);
                 assertSameAnswers(t, ref, rng.nextInt(keyRange), where);
 
@@ -107,6 +285,68 @@ class BPlusTreeTest {
             checkInvariants(t);
             assertEquals(STRESS_STEPS, t.size(), () -> "size after " + STRESS_STEPS + " inserts");
         }
+    }
+
+    /**
+     * Mixed insert / remove / removeAll against TreeMap, with structural checks along the way.
+     * Small key ranges keep the tree small, so it constantly grows AND shrinks
+     * (splits, borrows, merges, root splits and root collapses all get exercised).
+     */
+    @ParameterizedTest
+    @ValueSource(ints = {3, 4, 5, 128})
+    void randomInsertsAndDeletesMatchReference(int order) {
+        for (int keyRange : new int[]{20, 300, 5_000}) {
+            BPlusTree<Integer> t = new BPlusTree<>(order);
+            TreeMap<Integer, Integer> ref = new TreeMap<>();
+            Random rng = new Random(SEED);
+
+            for (int step = 1; step <= STRESS_STEPS; step++) {
+                int x = rng.nextInt(keyRange);
+                int roll = rng.nextInt(100);
+                String op;
+                if (roll < 50) {
+                    op = "insert";
+                    t.insert(x);
+                    ref.merge(x, 1, Integer::sum);
+                } else if (roll < 90) {
+                    op = "remove";
+                    t.remove(x);
+                    ref.computeIfPresent(x, (k, c) -> c == 1 ? null : c - 1);
+                } else {
+                    op = "removeAll";
+                    t.removeAll(x);
+                    ref.remove(x);
+                }
+
+                final int s = step;
+                Supplier<String> where = () -> "order " + order + ", keyRange " + keyRange
+                        + ", step " + s + " after " + op + "(" + x + ")";
+
+                assertEquals(refSize(ref), t.size(), () -> where.get() + " size");
+                assertSameAnswers(t, ref, x, where);
+                assertSameAnswers(t, ref, rng.nextInt(keyRange + 10) - 5, where);
+
+                if (step % CHECK_EVERY == 0) checkInvariants(t);
+            }
+            checkInvariants(t);
+        }
+    }
+
+    // =====================================================================
+    // Helpers
+    // =====================================================================
+
+    static BPlusTree<Integer> tree(int... values) {
+        BPlusTree<Integer> t = new BPlusTree<>(3);
+        insertAll(t, values);
+        checkInvariants(t);
+        return t;
+    }
+
+    static int refSize(TreeMap<Integer, Integer> ref) {
+        int n = 0;
+        for (int c : ref.values()) n += c;
+        return n;
     }
 
     // ---- Helpers ----
